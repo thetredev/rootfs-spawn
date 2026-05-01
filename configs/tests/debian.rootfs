@@ -35,10 +35,6 @@ init = {
   Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
   EOF
 
-  cat >> /etc/environment <<EOF
-  EDITOR=vim
-  EOF
-
   update-ca-certificates --fresh
 }
 
@@ -47,6 +43,10 @@ imports = [
 ]
 
 provision = {
+  cat >> /etc/environment <<EOF
+  EDITOR=vim
+  EOF
+
   systemctl disable \
     networking \
     systemd-networkd-wait-online
