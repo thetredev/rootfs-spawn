@@ -23,3 +23,7 @@ rootfs-spawn = "rootfs_spawn.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rootfs_spawn"]
+
+[tool.ruff]
+# Disable formatting in Markdown files
+extend-exclude = ["*.md"]
