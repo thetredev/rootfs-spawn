@@ -3,10 +3,22 @@ import shutil
 from pathlib import Path
 from typing import Iterator
 
+import pretty_errors
 import defopt
 from plumbum import local, FG
 
 from rootfs_spawn import parser
+
+
+pretty_errors.configure(
+    full_line_newline=False,
+    filename_display=pretty_errors.FILENAME_FULL,
+    display_link=True,
+    truncate_code=True,
+    truncate_locals=True,
+    display_arrow=True,
+    exception_above=True,
+)
 
 
 PREREQUISITE_MAP: dict[str, list[Path]] = {

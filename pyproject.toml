@@ -4,7 +4,12 @@ version = "0.0.1"
 description = "A small Python tool to spawn new distros by populating the rootfs using the respective mechanism (debootstrap, dnf, pacstrap, ...)."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = ["plumbum>=1.10", "defopt>=7.0", "lark>=1.3.1"]
+dependencies = [
+  "plumbum>=1.10",
+  "defopt>=7.0",
+  "lark>=1.3.1",
+  "pretty-errors>=1.2",
+]
 
 [build-system]
 requires = ["hatchling"]
