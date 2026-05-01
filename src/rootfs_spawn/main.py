@@ -69,6 +69,11 @@ def assert_prerequisites(executables: Iterator[Path]) -> Iterator[Path]:
         )
 
 
+def shell_command(arg0: str, *args: list[str]):
+    command = local[arg0]
+    _ = command[*args] & FG
+
+
 # all args after the * are switches (i.e., -c, --count, -x)
 # greeting: str, y: int, *, count: int = 1, x: str
 
@@ -97,11 +102,6 @@ def cli_create(
     statements = parser.parse(config_path.read_text(), search_path=resolved_search_path)
     merged = parser.merge(statements)
 
-    import json
-
-    print(json.dumps(merged, indent=2))
-    exit(0)
-
     spawn_command_args = f"{merged['spawn']} {rootfs_dir}".split(" ")
     spawn_command_arg0 = spawn_command_args.pop(0)
 
@@ -110,8 +110,7 @@ def cli_create(
     Path(packages_cache_dir).mkdir(parents=True, exist_ok=True)
     shutil.rmtree(rootfs_dir, ignore_errors=True)
 
-    spawn_command = local[spawn_command_arg0]
-    _ = spawn_command[*spawn_command_args] & FG
+    shell_command(spawn_command_arg0, spawn_command_args)
 
     # if distro not in PREREQUISITE_MAP:
     #     raise DistroNotSupportedError(distro)
