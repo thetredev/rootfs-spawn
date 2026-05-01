@@ -1,4 +1,7 @@
 provision = {
+  rm -rf /root/.bashrc
   cp /etc/skel/.bashrc /root/.bashrc
+
+  /root/.profile
   cp /etc/skel/.profile /root/.profile
 }
