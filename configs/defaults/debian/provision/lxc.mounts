@@ -1,0 +1,5 @@
+provision = {
+  systemctl mask \
+    sys-kernel-debug.mount \
+    sys-kernel-config.mount
+}

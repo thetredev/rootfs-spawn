@@ -1,0 +1,5 @@
+provision = {
+  cat > /etc/environment <<EOF
+  TERM=xterm-256color
+  EOF
+}

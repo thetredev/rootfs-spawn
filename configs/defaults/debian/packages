@@ -1,0 +1,24 @@
+packages = [
+  systemd
+  libpam-systemd
+  ifupdown2
+  iproute2
+  dbus
+  locales
+  tzdata
+  bash-completion
+  polkitd
+  curl
+  openssh-server
+  nano
+  iptables
+  iputils-ping
+  net-tools
+  bind9-dnsutils
+  mtr-tiny
+  procps
+  gnupg2
+  ca-certificates
+  openssl
+  apt-transport-https
+]

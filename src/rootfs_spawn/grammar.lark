@@ -1,0 +1,77 @@
+start: statement+
+
+statement: imports_stmt
+         | assignment
+         | block_def
+
+// Import statement: imports = [ path... ]
+
+imports_stmt: "imports" "=" "[" _NL+ imports_item* "]" _NL*
+
+imports_item: IMPORT_PATH _NL+
+
+// Scalar or list assignment
+
+assignment: IDENT "=" value _NL+
+
+value: scalar
+      | list_val
+
+scalar: BARE_STRING
+      | ESCAPED_STRING
+
+// Newline-separated list (no commas)
+
+list_val: "[" _NL+ list_item* "]"
+
+list_item: BARE_STRING _NL+
+
+// Named shell-script block
+
+block_def: IDENT "=" "{" _NL+ block_body "}" _NL*
+
+block_body: block_line*
+
+block_line: BLOCK_CONTENT_LINE _NL
+      | BLANK_LINE
+
+// ─── Terminals ───────────────────────────────────────────────────────────────
+
+// Import path: may contain slashes, dots, and a trailing glob wildcard.
+
+IMPORT_PATH: /[a-zA-Z0-9_.][a-zA-Z0-9_.\/-]*(?:\/\*|\*)?/
+
+// Assignment LHS: identifier followed by '=' (lookahead keeps '=' out of token)
+// Must not match the keyword "imports".
+
+IDENT.2: /(?!imports(?=[ \t]*=))[a-zA-Z_][a-zA-Z0-9_]*(?=[ \t]*=)/
+
+// Quoted string — higher priority than BARE_STRING so it wins on '"'
+
+ESCAPED_STRING.3: /\"[^\"\\]*(?:\\.[^\"\\]*)*\"/
+
+// Unquoted value: runs of non-whitespace chars.
+
+// ${...} interpolation sequences are matched as a unit so braces inside them
+
+// don't look like block delimiters.
+
+BARE_STRING: /(?:\$\{[^}]*\}|[^\s\[\]={}\#])+/
+
+// Non-empty line inside a block that is not a lone closing brace.
+
+BLOCK_CONTENT_LINE: /(?![ \t]*\}[ \t]*(\r?\n|$))[^\n]+/
+
+// Blank or whitespace-only line inside a block (consumed as a block_line).
+
+BLANK_LINE: /[ \t]*\r?\n/
+
+// _NL is an inline (anonymous) terminal — Lark drops it from tree children.
+
+_NL: /\r?\n/
+
+%ignore /[ \t]+/
+
+COMMENT: /#[^\n]*/
+
+%ignore COMMENT

@@ -1,0 +1,4 @@
+provision = {
+  cp /etc/skel/.bashrc /root/.bashrc
+  cp /etc/skel/.profile /root/.profile
+}

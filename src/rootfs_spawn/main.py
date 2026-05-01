@@ -6,7 +6,7 @@ from typing import Iterator
 import defopt
 from plumbum import local, FG
 
-from rootfs_spawn.parser import parse as parse_dsl
+from rootfs_spawn import parser
 
 
 PREREQUISITE_MAP: dict[str, list[Path]] = {
@@ -73,7 +73,9 @@ def assert_prerequisites(executables: Iterator[Path]) -> Iterator[Path]:
 # greeting: str, y: int, *, count: int = 1, x: str
 
 
-def cli_create(distro: str, config: str, rootfs_dir: str = "output"):
+def cli_create(
+    distro: str, config: str, rootfs_dir: str = "output", search_path: str = ""
+):
     """
     Spawn a rootfs!
 
@@ -84,14 +86,26 @@ def cli_create(distro: str, config: str, rootfs_dir: str = "output"):
                    A stanza file can be initialized via `rootfs-spawn config <distro> <name>`
 
     :param rootfs_dir: The path to spawn the rootfs in.
-    """
-    config_text = Path(config).read_text()
-    result = parse_dsl(config_text)
 
-    spawn_command_args = f"{result['spawn']} {rootfs_dir}".split(" ")
+    :param search_path: Base directory for resolving imports.
+                        Defaults to the config file's parent directory.
+    """
+    config_path = Path(config)
+    resolved_search_path = (
+        Path(search_path) if search_path else config_path.resolve().parent.parent
+    )
+    statements = parser.parse(config_path.read_text(), search_path=resolved_search_path)
+    merged = parser.merge(statements)
+
+    import json
+
+    print(json.dumps(merged, indent=2))
+    exit(0)
+
+    spawn_command_args = f"{merged['spawn']} {rootfs_dir}".split(" ")
     spawn_command_arg0 = spawn_command_args.pop(0)
 
-    packages_cache_dir = result["packages_cache_dir"]
+    packages_cache_dir = str(merged["packages_cache_dir"])
 
     Path(packages_cache_dir).mkdir(parents=True, exist_ok=True)
     shutil.rmtree(rootfs_dir, ignore_errors=True)

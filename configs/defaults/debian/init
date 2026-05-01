@@ -1,0 +1,7 @@
+init = {
+  unlink /mnt/rootfs/etc/resolv.conf
+  cp /mnt/host/etc/resolv.conf /mnt/rootfs/etc/resolv.conf
+
+  unlink /mnt/rootfs/etc/localtime
+  ln -sf /mnt/rootfs/$(readlink -f /mnt/host/etc/localtime) /mnt/rootfs/etc/localtime
+}

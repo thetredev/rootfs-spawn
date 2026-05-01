@@ -1,11 +1,14 @@
+# TODO: This code was written entirely by Claude Code.
+#       It works for now, but it still needs to be reviewed and optimized.
+
 """
-dsl_parser.py — Python parser for the provisioning DSL using Lark.
+parser.py — Python parser for the provisioning DSL using Lark.
 
 Install dependency:
     pip install lark
 
 Usage:
-    python dsl_parser.py config.dsl
+    python -m rootfs_spawn.parser config.rootfs
 
 Variable interpolation
 ----------------------
@@ -19,95 +22,66 @@ Lists are joined with commas when interpolated into a string, e.g.:
     spawn = { debootstrap --include=${packages} }
     → "debootstrap --include=systemd,curl"
 
-An undefined variable reference is left as-is (${name} unchanged) and a
-warning is emitted to stderr.
+An undefined variable reference is left as-is (${name} unchanged).
+
+Output format
+-------------
+`parse()` returns an ordered list of Statement namedtuples so that duplicate
+statement names and their relative order are preserved exactly as written in
+the .rootfs file.  Each Statement has:
+    kind  — "imports" | "assignment" | "block"
+    name  — key name (for assignment/block), None for imports
+    value — list[str] of import paths | str scalar | list[str] | str block body
 """
 
 import textwrap
 import re
 import sys
+from pathlib import Path
+from typing import NamedTuple
 
 from lark import Lark, Transformer
 
 # ─── Grammar ─────────────────────────────────────────────────────────────────
-# NEWLINEs are declared as anonymous literals (underscore-prefixed rules drop
-# their children) so the transformer never sees them as positional arguments.
 
-GRAMMAR = r"""
-start: statement+
+_GRAMMAR_PATH = Path(__file__).parent / "grammar.lark"
+GRAMMAR = _GRAMMAR_PATH.read_text()
 
-statement: assignment
-         | block_def
 
-// Scalar or list assignment — NEWLINE is matched but discarded via _NL alias
-assignment: NAME "=" value _NL+
+# ─── AST types ───────────────────────────────────────────────────────────────
 
-value: scalar
-     | list_val
 
-scalar: BARE_STRING
-      | ESCAPED_STRING
-
-// Newline-separated list (no commas)
-list_val: "[" _NL+ list_item* "]"
-
-list_item: BARE_STRING _NL+
-
-// Named shell-script block
-block_def: NAME "=" "{" _NL+ block_body "}" _NL*
-
-block_body: block_line*
-
-block_line: BLOCK_CONTENT_LINE _NL
-          | _NL
-
-// ─── Terminals ───────────────────────────────────────────────────────────────
-
-// Unquoted value: runs of non-whitespace chars.
-// ${...} interpolation sequences are matched as a unit so braces inside them
-// don't look like block delimiters.
-BARE_STRING: /(?:\$\{[^}]*\}|[^\s\[\]={}\#])+/
-
-// Non-empty line inside a block that is not a lone closing brace.
-// [^\n]+ ensures at least one character — no zero-width matches for Earley.
-BLOCK_CONTENT_LINE: /(?m)(?![ \t]*\}[ \t]*$)[^\n]+/
-
-NAME: /[a-zA-Z_][a-zA-Z0-9_]*/
-
-// _NL is an inline (anonymous) terminal — Lark drops it from tree children.
-_NL: /\r?\n/
-
-%ignore /[ \t]+/
-
-COMMENT: /#[^\n]*/
-%ignore COMMENT
-
-%import common.ESCAPED_STRING
-"""
+class Statement(NamedTuple):
+    kind: str  # "imports" | "assignment" | "block"
+    name: str | None
+    value: object  # list[str] | str
 
 
 # ─── Transformer ─────────────────────────────────────────────────────────────
 
 
 class DSLTransformer(Transformer):
-    """Converts Lark parse tree into plain Python dicts/lists/strings."""
+    """Converts Lark parse tree into an ordered list of Statement objects."""
 
     def start(self, statements):
-        result = {}
-        for stmt in statements:
-            result.update(stmt)
-        return result
+        return list(statements)
 
     def statement(self, items):
         return items[0]
 
+    def imports_stmt(self, items):
+        return Statement(kind="imports", name=None, value=[str(p) for p in items])
+
+    def imports_item(self, items):
+        return str(items[0])
+
     def assignment(self, items):
-        name, value = items[0], items[1]
-        return {str(name): value}
+        name, value = str(items[0]), items[1]
+        return Statement(kind="assignment", name=name, value=value)
 
     def block_def(self, items):
-        name, body = items[0], items[1]
-        return {str(name): body}
+        name, body = str(items[0]), items[1]
+        return Statement(kind="block", name=name, value=body)
 
     def value(self, items):
         return items[0]
@@ -129,37 +103,25 @@ class DSLTransformer(Transformer):
         return textwrap.dedent(joined_lines).strip()
 
     def block_line(self, items):
-        # BLOCK_CONTENT_LINE branch → items = [token]
-        # blank _NL branch        → items = []  (terminal was discarded)
         if items:
-            return str(
-                items[0]
-            )  # Keep original line content including indentation for dedent later
+            return str(items[0])
         return ""  # blank line preserved
 
 
 # ─── Variable resolution ─────────────────────────────────────────────────────
 
-_VAR_RE = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+_VAR_RE = re.compile(r"(?<!\\)\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
 
-# Modified to ignore escaped dollar signs and suppress warnings for undefined variables
 def _interpolate(value: str, context: dict, *, _stack: frozenset = frozenset()) -> str:
-    """Expand ${name} references in a string using the context dict.
-
-    - Lists are serialised as comma-joined strings when interpolated.
-    - Circular references are detected and left unexpanded with a warning.
-    - Unknown variables are left as-is with a warning.
-    """
+    """Expand ${name} references in a string using the context dict."""
 
     def replace(m: re.Match) -> str:
         name = m.group(1)
         if name in _stack:
             print(f"warning: circular variable reference: ${{{name}}}", file=sys.stderr)
             return m.group(0)
-        if (
-            name not in context
-        ):  # If variable is not defined, leave it as-is without warning
+        if name not in context:
             return m.group(0)
         raw = context[name]
         if isinstance(raw, list):
@@ -172,24 +134,81 @@ def _interpolate(value: str, context: dict, *, _stack: frozenset = frozenset()) 
     return _VAR_RE.sub(replace, value)
 
 
-# Changed regex to ignore escaped dollar signs
-_VAR_RE = re.compile(r"(?<!\\)\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+# ─── Import expansion ────────────────────────────────────────────────────────
 
 
-def _resolve(parsed: dict) -> dict:
-    """Two-pass variable resolution over a parsed DSL document.
+def _expand_imports(
+    statements: list[Statement],
+    search_path: Path,
+    _seen: frozenset[Path] = frozenset(),
+) -> list[Statement]:
+    """Replace every imports Statement with the statements from the referenced
+    fragment files, resolved relative to search_path.  Glob paths (ending /*)
+    expand to all files in the named directory, sorted by name."""
+    result = []
+    lark = make_parser()
+    for stmt in statements:
+        if stmt.kind != "imports":
+            result.append(stmt)
+            continue
+        for import_path in stmt.value:  # type: ignore[union-attr]
+            if import_path.endswith("/*"):
+                dir_path = search_path / import_path[:-2]
+                paths = sorted(p for p in dir_path.iterdir() if p.is_file())
+            else:
+                paths = [search_path / import_path]
+            for path in paths:
+                path = path.resolve()
+                if path in _seen:
+                    raise ValueError(f"circular import: {path}")
+                fragment = path.read_text()
+                tree = lark.parse(fragment)
+                raw = DSLTransformer().transform(tree)
+                expanded = _expand_imports(raw, search_path, _seen | {path})
+                result.extend(expanded)
+    return result
 
-    Pass 1 — collect all scalar and list assignments as the variable context.
-    Pass 2 — walk every value (scalar, list item, block body) and expand ${…}.
+
+# ─── Merge ───────────────────────────────────────────────────────────────────
+
+
+def merge(statements: list[Statement]) -> dict[str, object]:
+    """Merge an ordered statement list into a single dict, C #include-style:
+
+    - scalars: last definition wins.
+    - lists: all lists with the same name are concatenated in document order.
+    - blocks: all bodies with the same name are concatenated in document order,
+      separated by a blank line.
+
+    Variable interpolation is performed after merging so that ${var} references
+    see the fully merged values.
     """
-    context: dict = {k: v for k, v in parsed.items() if isinstance(v, (str, list))}
+    raw: dict[str, object] = {}
 
-    result = {}
-    for key, value in parsed.items():
+    for stmt in statements:
+        if stmt.kind == "block":
+            existing = raw.get(stmt.name)  # type: ignore[arg-type]
+            if existing is None:
+                raw[stmt.name] = str(stmt.value)  # type: ignore[index]
+            else:
+                raw[stmt.name] = f"{existing}\n\n{stmt.value}"  # type: ignore[index]
+        elif stmt.kind == "assignment":
+            if isinstance(stmt.value, list):
+                existing = raw.get(stmt.name)  # type: ignore[arg-type]
+                if isinstance(existing, list):
+                    raw[stmt.name] = existing + stmt.value  # type: ignore[index]
+                else:
+                    raw[stmt.name] = list(stmt.value)  # type: ignore[index]
+            else:
+                raw[stmt.name] = stmt.value  # type: ignore[index]
+
+    context = {k: v for k, v in raw.items() if isinstance(v, (str, list))}
+    result: dict[str, object] = {}
+    for key, value in raw.items():
         if isinstance(value, str):
             result[key] = _interpolate(value, context)
         elif isinstance(value, list):
-            result[key] = [_interpolate(item, context) for item in value]
+            result[key] = [_interpolate(str(i), context) for i in value]
         else:
             result[key] = value
     return result
@@ -202,9 +221,17 @@ def make_parser() -> Lark:
     return Lark(GRAMMAR, parser="earley", ambiguity="resolve")
 
 
-def parse(text: str) -> dict:
-    """Parse DSL source text, resolve ${variable} references, and return a dict."""
-    parser = make_parser()
-    tree = parser.parse(text)
+def parse(text: str, search_path: Path | None = None) -> list[Statement]:
+    """Parse DSL source text and expand imports into an ordered statement list.
+
+    Variable interpolation is deferred to merge() so ${var} references see
+    the fully merged values.
+
+    search_path: directory used to resolve import paths (default: cwd).
+    """
+    if search_path is None:
+        search_path = Path.cwd()  # imports resolved relative to cwd by default
+    lark = make_parser()
+    tree = lark.parse(text)
     raw = DSLTransformer().transform(tree)
-    return _resolve(raw)  # Pass the raw parsed data for resolution
+    return _expand_imports(raw, search_path)
