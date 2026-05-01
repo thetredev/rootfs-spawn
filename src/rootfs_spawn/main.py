@@ -90,14 +90,9 @@ def shell_command(arg0: str, *args: list[str]):
 # greeting: str, y: int, *, count: int = 1, x: str
 
 
-def cli_create(
-    distro: str, config: str, rootfs_dir: str = "output", search_path: str = ""
-):
+def cli_create(config: str, rootfs_dir: str = "output", search_path: str = ""):
     """
     Spawn a rootfs!
-
-    :param distro: The distro mechanism to use to spawn the rootfs.
-                   Supported distros: debian, ubuntu, archlinux
 
     :param config: A config file to use for bootstrapping the rootfs.
                    A stanza file can be initialized via `rootfs-spawn config <distro> <name>`
