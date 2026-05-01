@@ -1,0 +1,172 @@
+release = trixie
+
+packages = [
+  systemd
+  libpam-systemd
+  systemd-resolved
+  ifupdown2
+  iproute2
+  dbus
+  locales
+  tzdata
+  bash-completion
+  polkitd
+  curl
+  openssh-server
+  nano
+  vim
+  iptables
+  iputils-ping
+  net-tools
+  bind9-dnsutils
+  mtr-tiny
+  procps
+  gnupg2
+  ca-certificates
+  openssl
+  apt-transport-https
+]
+
+packages_cache_dir = /tmp/debootstrap/${release}
+
+
+spawn = {
+  debootstrap --cache-dir=${packages_cache_dir} --include=${packages} ${release}
+}
+
+
+init = {
+  unlink ${rootfs_workdir}/etc/resolv.conf
+  cp /etc/resolv.conf ${rootfs_workdir}/etc/resolv.conf
+
+  unlink ${rootfs_workdir}/etc/localtime
+  cp /etc/localtime ${rootfs_workdir}/etc/localtime
+}
+
+
+provision = {
+  apt-get update -y
+  apt-get full-upgrade -y
+
+  systemctl disable networking systemd-networkd-wait-online
+  systemctl mask networking systemd-networkd-wait-online sys-kernel-debug.mount sys-kernel-config.mount
+
+  mkdir -p /etc/network/interfaces.d
+
+  mkdir -p /etc/systemd/network/eth0.network.d
+  cat > /etc/systemd/network/eth0.network.d/metric.conf <<EOF
+  [IPv6AcceptRA]
+  RouteMetric=512
+  EOF
+
+  cat > /etc/systemd/network/eth0.network.d/dns.conf <<EOF
+  [Network]
+  DNS=2a01:4ff:ff00::add:1
+  DNS=2a01:4ff:ff00::add:2
+  EOF
+
+  cat > /etc/systemd/network/eth0.network.d/release.conf <<EOF
+  [DHCPv6]
+  SendRelease=true
+  EOF
+
+  mkdir -p /etc/systemd/network/eth1.network.d
+  cat > /etc/systemd/network/eth1.network.d/dns.conf <<EOF
+  [Network]
+  DNS=fd8c:314f:f123::2
+  EOF
+
+  cat > /etc/systemd/network/eth1.network.d/release.conf <<EOF
+  [DHCPv6]
+  SendRelease=true
+  EOF
+
+  cat > /etc/systemd/system/systemd-networkd-wait-all.service <<EOF
+  [Unit]
+  Description=Wait for all network interfaces to come UP
+  Documentation=man:systemd-networkd(5)
+  DefaultDependencies=no
+  After=local-fs.target
+
+  [Service]
+  Type=oneshot
+  RemainAfterExit=yes
+  ExecStart=/usr/local/bin/systemd-networkd-wait-all.sh
+
+  [Install]
+  WantedBy=multi-user.target
+  EOF
+  ln -s /etc/systemd/system/systemd-networkd-wait-all.service /etc/systemd/system/multi-user.target.wants/
+
+  cat > /usr/local/bin/systemd-networkd-wait-all.sh <<EOF
+  #!/bin/bash
+
+  set -xe
+
+
+  ifaces=\$(ls /etc/systemd/network/eth*.network | grep -v '\.d' | cut -d '.' -f 1 | rev | cut -d '/' -f 1 | rev)
+
+  for iface in \${ifaces}; do
+          until [[ \$(ip a s dev \${iface} | grep inet6 | wc -l) -eq 2 ]]; do
+                  sleep 0.1
+          done
+  done
+  EOF
+
+  apt purge -y ifupdown
+
+  rm -rf /etc/apt/sources.list*
+  mkdir -p /etc/apt/sources.list.d
+
+  cat > /etc/apt/sources.list.d/debian.sources <<EOF
+  Types: deb
+  URIs: https://mirror.hetzner.com/debian/packages/
+  Suites: trixie trixie-updates trixie-backports
+  Components: main contrib non-free non-free-firmware
+  Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+  Types: deb
+  URIs: https://mirror.hetzner.com/debian/security/
+  Suites: trixie-security
+  Components: main contrib non-free non-free-firmware
+  Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+  EOF
+
+  cat > /etc/apt/apt.conf.d/99lxc <<EOF
+  APT::Install-Recommends "false";
+  APT::Install-Suggests "false";
+
+  APT::Keep-Downloaded-Packages "false";
+  EOF
+
+  cat > /etc/environment <<EOF
+  TERM=xterm-256color
+  EDITOR=vim
+
+  EOF
+
+  cat > /etc/locale.conf <<EOF
+  LC_ALL="C"
+  LANG="en_US.UTF-8"
+  LANGUAGE="en_US:en"
+  EOF
+
+  echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
+  locale-gen
+
+
+  cp /etc/skel/.bashrc /root/.bashrc
+  cp /etc/skel/.profile /root/.profile
+
+  rm -rf /etc/motd*
+  touch /etc/motd
+
+  update-ca-certificates --fresh
+
+  systemctl enable ssh
+
+  apt-get autoremove --purge -y
+  apt-get autoclean -y
+  apt-get clean -y
+  rm -rf /var/lib/apt/lists/*
+}

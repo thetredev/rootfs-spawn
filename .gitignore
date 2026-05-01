@@ -2,4 +2,6 @@
 /uv.lock
 /dist
 
+/output
+
 __pycache__
