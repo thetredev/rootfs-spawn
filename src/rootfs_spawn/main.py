@@ -1,7 +1,8 @@
 import logging
 import shutil
+import sys
 from pathlib import Path
-from typing import Iterator
+from typing import Iterable
 
 import pretty_errors
 import defopt
@@ -66,28 +67,17 @@ def create_logger() -> logging.Logger:
 logger = create_logger()
 
 
-def assert_prerequisites(executables: Iterator[Path]) -> Iterator[Path]:
-    for executable in executables:
-        posix_path = executable.as_posix()
-        resolved_path = shutil.which(posix_path)
-
-        if resolved_path is None:
-            raise PrerequisiteNotExecutableError(
-                f"The command 'which {posix_path}' has failed!"
-            )
-
-        yield Path(resolved_path)
-        logger.info(
-            f"Found prerequisite executable '{executable}' at '{resolved_path}'"
-        )
-
-
-def shell_command(arg0: str, *args: list[str]) -> None:
+def shell_command(arg0: str, *args: Iterable[str]) -> None:
     command = local[arg0]
     _ = command[*args] & FG
 
 
-def spawn_procedure(config: rootfs_spawn_config, output_path: Path) -> None:
+def spawn_procedure(
+    config: rootfs_spawn_config,
+    output_path: Path,
+    force: bool = False,
+    skip_removal: bool = False,
+) -> None:
     # create packages cache dir
     packages_cache_dir = str(config["packages_cache_dir"])
     Path(packages_cache_dir).mkdir(parents=True, exist_ok=True)
@@ -96,89 +86,135 @@ def spawn_procedure(config: rootfs_spawn_config, output_path: Path) -> None:
     spawn_proc_args = f"{config['spawn']} {output_path}".split(" ")
     spawn_proc_arg0 = spawn_proc_args.pop(0)
 
-    shutil.rmtree(output_path, ignore_errors=True)
+    if output_path.exists() and not skip_removal:
+        if force:
+            shutil.rmtree(output_path)
+        elif (
+            not input(f"rootfs_dir '{output_path}' already exists! Remove it? [y/n]: ")
+            .strip()
+            .startswith(("y", "Y"))
+        ):
+            logger.error("`rootfs_dir` '%s' already exists!", output_path.as_posix())
+            logger.error("Aborting `spawn` procedure!")
+            sys.exit(1)
+
     shell_command(spawn_proc_arg0, spawn_proc_args)
 
 
-def systemd_nspawn(procedure: str, ctl_rootfs_path: Path, rootfs_path: Path) -> None:
-    ctl_rootfs_path_string = ctl_rootfs_path.as_posix()
+def systemd_nspawn(
+    procedure: str,
+    rootfs_path: Path,
+    *mounts: Iterable[str],
+    private_users: str | None = "pick",
+) -> None:
     rootfs_path_string = rootfs_path.as_posix()
 
     systemd_nspawn_arg0 = "systemd-nspawn"
     systemd_nspawn_args = [
         "--resolv-conf=replace-host",
         "--no-pager",
-        "--private-users=pick",
         "-D",
-        ctl_rootfs_path_string,
+        rootfs_path_string,
         "--bind-ro=/:/mnt/host",
-        f"--bind={rootfs_path_string}:/mnt/rootfs",
+        *[f"--bind={mount}" for mount in mounts],
         "-q",
-        "--pipe",
         "--",
         "/bin/bash",
         "-c",
-        f"<<EOFFFFFF\n{procedure}\nEOFFFFFF",
+        f"set -xe\n\ncd ~\n\n{procedure}",
     ]
 
-    print(" ".join(systemd_nspawn_args))
+    if private_users is not None:
+        systemd_nspawn_args.insert(0, f"--private-users={private_users}")
+
     shell_command(systemd_nspawn_arg0, systemd_nspawn_args)
 
 
-def systemd_nspawn_nested(
-    child_procedure: str, ctl_rootfs_path: Path, rootfs_path: Path
-) -> None:
-    procedure = f"systemd-nspawn -D /mnt/rootfs -q --ephemeral -- /bin/bash -c {child_procedure}"
-    systemd_nspawn(procedure, ctl_rootfs_path, rootfs_path)
+def parse_config(config_path: Path, search_path: Path) -> rootfs_spawn_config:
+    statements = parser.parse(config_path.read_text(), search_path)
+    config = parser.merge(statements)
+
+    return config
 
 
-# all args after the * are switches (i.e., -c, --count, -x)
-# greeting: str, y: int, *, count: int = 1, x: str
+def create_ctl(search_path: Path) -> Path:
+    config_rootfs = search_path / "ctl.rootfs"
+    output_path = Path("/var/lib/machines/rootfs-spawn-ctl")
+
+    config = parse_config(config_rootfs, search_path)
+    if not output_path.exists():
+        spawn_procedure(config, output_path, force=False, skip_removal=True)
+
+    systemd_nspawn(str(config["init"]), output_path, f"{output_path}:/mnt/rootfs")
+    systemd_nspawn(str(config["provision"]), output_path)
+    systemd_nspawn(str(config["cleanup"]), output_path)
+
+    return output_path
 
 
 def cli_create(
-    config: Path, output: Path = Path("output"), search_path: Path = Path.cwd()
+    config_path: Path,
+    output_path: Path = Path("output"),
+    search_path: Path = Path.cwd(),
+    *,
+    force: bool = False,
 ) -> None:
     """
     Spawn a rootfs!
 
-    :param config: A config file to use for bootstrapping the rootfs.
+    :param config_path: A config file to use for bootstrapping the rootfs.
                    A stanza file can be initialized via `rootfs-spawn config <distro> <name>`
 
-    :param rootfs_dir: The path to spawn the rootfs in.
+    :param output_path: The path to spawn the rootfs in.
 
     :param search_path: Base directory for resolving imports.
                         Defaults to the config file's parent directory.
+
+    :param force: Indicates whether or not to recursively remove `output_path`
+                  before populating it via the bootstrapper if it already exists,
+                  without asking first.
     """
-    ctl_rootfs = search_path / "ctl.rootfs"
-    ctl_output_path = Path("/var/lib/machines/rootfs-spawn-ctl")
 
-    statements = parser.parse(ctl_rootfs.read_text(), search_path)
-    ctl_config = parser.merge(statements)
+    rootfs_dir = output_path.resolve()
+    rootfs_dir_string = rootfs_dir.as_posix()
+    config = parse_config(config_path, search_path)
 
-    # output_path = output.resolve()
+    if rootfs_dir.exists() and not force:
+        if (
+            input(f"rootfs_dir '{rootfs_dir}' already exists! Remove it? [y/n]: ")
+            .strip()
+            .startswith(("y", "Y"))
+        ):
+            shutil.rmtree(rootfs_dir)
+        else:
+            logger.error("`rootfs_dir` '%s' already exists!", rootfs_dir_string)
+            logger.error("Aborting `spawn` procedure!")
+            sys.exit(1)
 
-    spawn_procedure(ctl_config, ctl_output_path)
-    print("INIT")
-    print("-----------------------------------------------")
-    systemd_nspawn(str(ctl_config["init"]), ctl_output_path, ctl_output_path)
-    print("PROVISION")
-    print("-----------------------------------------------")
-    systemd_nspawn_nested(
-        str(ctl_config["provision"]), ctl_output_path, ctl_output_path
+    shutil.rmtree(rootfs_dir)
+    rootfs_dir.mkdir(parents=True, exist_ok=False)
+
+    ctl_output_path = create_ctl(search_path)
+
+    packages_cache_dir = str(config["packages_cache_dir"])
+    Path(packages_cache_dir).mkdir(parents=True, exist_ok=True)
+
+    spawn_command = f"{config['spawn']} /mnt/rootfs"
+    systemd_nspawn(
+        spawn_command,
+        ctl_output_path,
+        f"{rootfs_dir_string}:/mnt/rootfs",
+        f"{packages_cache_dir}:{packages_cache_dir}",
+        private_users=None,
     )
-    print("-----------------------------------------------")
-    print("CLEANUP")
-    print("-----------------------------------------------")
-    systemd_nspawn_nested(str(ctl_config["cleanup"]), ctl_output_path, ctl_output_path)
-    print("-----------------------------------------------")
 
-    # if distro not in PREREQUISITE_MAP:
-    #     raise DistroNotSupportedError(distro)
-
-    # executables = PREREQUISITE_MAP[distro]
-    # resolved_executable_paths = list(assert_prerequisites(iter(executables)))
-    # assert len(executables) == len(resolved_executable_paths)
+    systemd_nspawn(
+        str(config["init"]),
+        rootfs_dir,
+        f"{rootfs_dir_string}:/mnt/rootfs",
+    )
+    systemd_nspawn(str(config["provision"]), rootfs_dir)
+    systemd_nspawn(str(config["cleanup"]), rootfs_dir)
 
 
 def cli_config(distro: str, name: str) -> None:
