@@ -42,6 +42,8 @@ from typing import NamedTuple
 
 from lark import Lark, Transformer
 
+from rootfs_spawn.types import rootfs_spawn_config
+
 # ─── Grammar ─────────────────────────────────────────────────────────────────
 
 _GRAMMAR_PATH = Path(__file__).parent / "grammar.lark"
@@ -172,7 +174,7 @@ def _expand_imports(
 # ─── Merge ───────────────────────────────────────────────────────────────────
 
 
-def merge(statements: list[Statement]) -> dict[str, object]:
+def merge(statements: list[Statement]) -> rootfs_spawn_config:
     """Merge an ordered statement list into a single dict, C #include-style:
 
     - scalars: last definition wins.
@@ -203,14 +205,14 @@ def merge(statements: list[Statement]) -> dict[str, object]:
                 raw[stmt.name] = stmt.value  # type: ignore[index]
 
     context = {k: v for k, v in raw.items() if isinstance(v, (str, list))}
-    result: dict[str, object] = {}
+    result: rootfs_spawn_config = {}
     for key, value in raw.items():
         if isinstance(value, str):
             result[key] = _interpolate(value, context)
         elif isinstance(value, list):
             result[key] = [_interpolate(str(i), context) for i in value]
         else:
-            result[key] = value
+            result[key] = str(value)
     return result
 
 
@@ -221,7 +223,7 @@ def make_parser() -> Lark:
     return Lark(GRAMMAR, parser="earley", ambiguity="resolve")
 
 
-def parse(text: str, search_path: Path | None = None) -> list[Statement]:
+def parse(text: str, search_path: Path) -> list[Statement]:
     """Parse DSL source text and expand imports into an ordered statement list.
 
     Variable interpolation is deferred to merge() so ${var} references see
@@ -229,8 +231,6 @@ def parse(text: str, search_path: Path | None = None) -> list[Statement]:
 
     search_path: directory used to resolve import paths (default: cwd).
     """
-    if search_path is None:
-        search_path = Path.cwd()  # imports resolved relative to cwd by default
     lark = make_parser()
     tree = lark.parse(text)
     raw = DSLTransformer().transform(tree)
