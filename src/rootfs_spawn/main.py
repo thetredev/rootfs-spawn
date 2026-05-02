@@ -180,18 +180,17 @@ def cli_create(
     config = parse_config(config_path, search_path)
 
     if rootfs_dir.exists() and not force:
-        if (
+        if not (
             input(f"rootfs_dir '{rootfs_dir}' already exists! Remove it? [y/n]: ")
             .strip()
             .startswith(("y", "Y"))
         ):
-            shutil.rmtree(rootfs_dir)
-        else:
             logger.error("`rootfs_dir` '%s' already exists!", rootfs_dir_string)
             logger.error("Aborting `spawn` procedure!")
             sys.exit(1)
 
-    shutil.rmtree(rootfs_dir)
+    if rootfs_dir.exists():
+        shutil.rmtree(rootfs_dir)
     rootfs_dir.mkdir(parents=True, exist_ok=False)
 
     ctl_output_path = create_ctl(search_path)
