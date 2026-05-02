@@ -1,4 +1,6 @@
 init = {
-  unlink /mnt/rootfs/etc/localtime
-  ln -sf /mnt/rootfs/$(readlink -f /mnt/host/etc/localtime) /mnt/rootfs/etc/localtime
+  cd /mnt/rootfs/etc
+
+  unlink localtime
+  ln -sf $(readlink -f /mnt/host/etc/localtime) localtime
 }
