@@ -8,6 +8,7 @@ import defopt
 from plumbum import local, FG
 
 from rootfs_spawn import parser
+from rootfs_spawn.types import rootfs_spawn_config
 
 
 pretty_errors.configure(
@@ -81,16 +82,63 @@ def assert_prerequisites(executables: Iterator[Path]) -> Iterator[Path]:
         )
 
 
-def shell_command(arg0: str, *args: list[str]):
+def shell_command(arg0: str, *args: list[str]) -> None:
     command = local[arg0]
     _ = command[*args] & FG
+
+
+def spawn_procedure(config: rootfs_spawn_config, output_path: Path) -> None:
+    # create packages cache dir
+    packages_cache_dir = str(config["packages_cache_dir"])
+    Path(packages_cache_dir).mkdir(parents=True, exist_ok=True)
+
+    # run "spawn" procedure
+    spawn_proc_args = f"{config['spawn']} {output_path}".split(" ")
+    spawn_proc_arg0 = spawn_proc_args.pop(0)
+
+    shutil.rmtree(output_path, ignore_errors=True)
+    shell_command(spawn_proc_arg0, spawn_proc_args)
+
+
+def systemd_nspawn(procedure: str, ctl_rootfs_path: Path, rootfs_path: Path) -> None:
+    ctl_rootfs_path_string = ctl_rootfs_path.as_posix()
+    rootfs_path_string = rootfs_path.as_posix()
+
+    systemd_nspawn_arg0 = "systemd-nspawn"
+    systemd_nspawn_args = [
+        "--resolv-conf=replace-host",
+        "--no-pager",
+        "--private-users=pick",
+        "-D",
+        ctl_rootfs_path_string,
+        "--bind-ro=/:/mnt/host",
+        f"--bind={rootfs_path_string}:/mnt/rootfs",
+        "-q",
+        "--pipe",
+        "--",
+        "/bin/bash",
+        "-c",
+        f"<<EOFFFFFF\n{procedure}\nEOFFFFFF",
+    ]
+
+    print(" ".join(systemd_nspawn_args))
+    shell_command(systemd_nspawn_arg0, systemd_nspawn_args)
+
+
+def systemd_nspawn_nested(
+    child_procedure: str, ctl_rootfs_path: Path, rootfs_path: Path
+) -> None:
+    procedure = f"systemd-nspawn -D /mnt/rootfs -q --ephemeral -- /bin/bash -c {child_procedure}"
+    systemd_nspawn(procedure, ctl_rootfs_path, rootfs_path)
 
 
 # all args after the * are switches (i.e., -c, --count, -x)
 # greeting: str, y: int, *, count: int = 1, x: str
 
 
-def cli_create(config: str, rootfs_dir: str = "output", search_path: str = ""):
+def cli_create(
+    config: Path, output: Path = Path("output"), search_path: Path = Path.cwd()
+) -> None:
     """
     Spawn a rootfs!
 
@@ -102,22 +150,28 @@ def cli_create(config: str, rootfs_dir: str = "output", search_path: str = ""):
     :param search_path: Base directory for resolving imports.
                         Defaults to the config file's parent directory.
     """
-    config_path = Path(config)
-    resolved_search_path = (
-        Path(search_path) if search_path else config_path.resolve().parent.parent
+    ctl_rootfs = search_path / "ctl.rootfs"
+    ctl_output_path = Path("/var/lib/machines/rootfs-spawn-ctl")
+
+    statements = parser.parse(ctl_rootfs.read_text(), search_path)
+    ctl_config = parser.merge(statements)
+
+    # output_path = output.resolve()
+
+    spawn_procedure(ctl_config, ctl_output_path)
+    print("INIT")
+    print("-----------------------------------------------")
+    systemd_nspawn(str(ctl_config["init"]), ctl_output_path, ctl_output_path)
+    print("PROVISION")
+    print("-----------------------------------------------")
+    systemd_nspawn_nested(
+        str(ctl_config["provision"]), ctl_output_path, ctl_output_path
     )
-    statements = parser.parse(config_path.read_text(), search_path=resolved_search_path)
-    merged = parser.merge(statements)
-
-    spawn_command_args = f"{merged['spawn']} {rootfs_dir}".split(" ")
-    spawn_command_arg0 = spawn_command_args.pop(0)
-
-    packages_cache_dir = str(merged["packages_cache_dir"])
-
-    Path(packages_cache_dir).mkdir(parents=True, exist_ok=True)
-    shutil.rmtree(rootfs_dir, ignore_errors=True)
-
-    shell_command(spawn_command_arg0, spawn_command_args)
+    print("-----------------------------------------------")
+    print("CLEANUP")
+    print("-----------------------------------------------")
+    systemd_nspawn_nested(str(ctl_config["cleanup"]), ctl_output_path, ctl_output_path)
+    print("-----------------------------------------------")
 
     # if distro not in PREREQUISITE_MAP:
     #     raise DistroNotSupportedError(distro)
@@ -127,7 +181,7 @@ def cli_create(config: str, rootfs_dir: str = "output", search_path: str = ""):
     # assert len(executables) == len(resolved_executable_paths)
 
 
-def cli_config(distro: str, name: str):
+def cli_config(distro: str, name: str) -> None:
     """
     Generate a config file to spawn a rootfs with.
 

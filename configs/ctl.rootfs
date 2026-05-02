@@ -1,0 +1,27 @@
+imports = [
+  defaults/debian/release
+  defaults/debian/packages
+  defaults/debian/cache
+  defaults/debian/spawn
+]
+
+packages = [
+  vim
+  debootstrap
+  systemd-container
+]
+
+imports = [
+  defaults/debian/init
+  defaults/debian/provision/*
+]
+
+provision = {
+  cat >> /etc/environment <<EOF
+  EDITOR=vim
+  EOF
+}
+
+imports = [
+  defaults/debian/cleanup
+]
