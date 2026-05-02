@@ -72,31 +72,9 @@ def shell_command(arg0: str, *args: Iterable[str]) -> None:
     _ = command[*args] & FG
 
 
-def spawn_procedure(
-    config: rootfs_spawn_config,
-    output_path: Path,
-    force: bool = False,
-    skip_removal: bool = False,
-) -> None:
-    # create packages cache dir
-    packages_cache_dir = str(config["packages_cache_dir"])
-    Path(packages_cache_dir).mkdir(parents=True, exist_ok=True)
-
-    # run "spawn" procedure
+def spawn_procedure(config: rootfs_spawn_config, output_path: Path) -> None:
     spawn_proc_args = f"{config['spawn']} {output_path}".split(" ")
     spawn_proc_arg0 = spawn_proc_args.pop(0)
-
-    if output_path.exists() and not skip_removal:
-        if force:
-            shutil.rmtree(output_path)
-        elif (
-            not input(f"rootfs_dir '{output_path}' already exists! Remove it? [y/n]: ")
-            .strip()
-            .startswith(("y", "Y"))
-        ):
-            logger.error("`rootfs_dir` '%s' already exists!", output_path.as_posix())
-            logger.error("Aborting `spawn` procedure!")
-            sys.exit(1)
 
     shell_command(spawn_proc_arg0, spawn_proc_args)
 
@@ -142,8 +120,9 @@ def create_ctl(search_path: Path) -> Path:
     output_path = Path("/var/lib/machines/rootfs-spawn-ctl")
 
     config = parse_config(config_rootfs, search_path)
+
     if not output_path.exists():
-        spawn_procedure(config, output_path, force=False, skip_removal=True)
+        spawn_procedure(config, output_path)
 
     systemd_nspawn(str(config["init"]), output_path, f"{output_path}:/mnt/rootfs")
     systemd_nspawn(str(config["provision"]), output_path)
