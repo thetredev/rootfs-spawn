@@ -65,13 +65,6 @@ def shell_command(arg0: str, *args: Iterable[str]) -> None:
     _ = command[*args] & FG
 
 
-def spawn_procedure(config: rootfs_spawn_config, output_path: Path) -> None:
-    spawn_proc_args = f"{config['spawn']} {output_path}".split(" ")
-    spawn_proc_arg0 = spawn_proc_args.pop(0)
-
-    shell_command(spawn_proc_arg0, spawn_proc_args)
-
-
 def systemd_nspawn(
     procedure: str,
     rootfs_path: Path,
@@ -122,7 +115,10 @@ def create_ctl(search_path: Path) -> Path:
 
     if not output_path.exists():
         logger.info("ctl rootfs: running SPAWN procedure")
-        spawn_procedure(config, output_path)
+        spawn_proc_args = f"{config['spawn']} {output_path}".split(" ")
+        spawn_proc_arg0 = spawn_proc_args.pop(0)
+
+        shell_command(spawn_proc_arg0, spawn_proc_args)
 
     logger.info("ctl rootfs: running INIT procedure")
     systemd_nspawn(str(config["init"]), output_path, f"{output_path}:/mnt/rootfs")
