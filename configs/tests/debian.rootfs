@@ -21,19 +21,19 @@ init = {
   rm -rf /etc/apt/sources.list*
   mkdir -p /etc/apt/sources.list.d
 
-  cat > /mnt/rootfs/etc/apt/sources.list.d/debian.sources <<EOF
-  Types: deb
-  URIs: https://mirror.hetzner.com/debian/packages/
-  Suites: trixie trixie-updates trixie-backports
-  Components: main contrib non-free non-free-firmware
-  Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+  #cat > /mnt/rootfs/etc/apt/sources.list.d/debian.sources <<EOF
+  #Types: deb
+  #URIs: https://mirror.hetzner.com/debian/packages/
+  #Suites: trixie trixie-updates trixie-backports
+  #Components: main contrib non-free non-free-firmware
+  #Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
 
-  Types: deb
-  URIs: https://mirror.hetzner.com/debian/security/
-  Suites: trixie-security
-  Components: main contrib non-free non-free-firmware
-  Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
-  EOF
+  #Types: deb
+  #URIs: https://mirror.hetzner.com/debian/security/
+  #Suites: trixie-security
+  #Components: main contrib non-free non-free-firmware
+  #Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+  #EOF
 
   update-ca-certificates --fresh
 }
