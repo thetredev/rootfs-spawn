@@ -58,6 +58,9 @@ logger = create_logger()
 
 
 def shell_command(arg0: str, *args: Iterable[str]) -> None:
+    arg_string = " ".join(*args)
+    logger.info("Executing shell command: %s %s", arg0, arg_string)
+
     command = local[arg0]
     _ = command[*args] & FG
 
@@ -109,13 +112,25 @@ def create_ctl(search_path: Path) -> Path:
     config_rootfs = search_path / "ctl.rootfs"
     output_path = Path("/var/lib/machines/rootfs-spawn-ctl")
 
+    logger.info(
+        "Creating rootfs-spawn-ctl rootfs at '%s' using search path '%s'",
+        output_path.resolve().as_posix(),
+        search_path.resolve().as_posix(),
+    )
+
     config = parse_config(config_rootfs, search_path)
 
     if not output_path.exists():
+        logger.info("ctl rootfs: running SPAWN procedure")
         spawn_procedure(config, output_path)
 
+    logger.info("ctl rootfs: running INIT procedure")
     systemd_nspawn(str(config["init"]), output_path, f"{output_path}:/mnt/rootfs")
+
+    logger.info("ctl rootfs: running PROVISION procedure")
     systemd_nspawn(str(config["provision"]), output_path)
+
+    logger.info("ctl rootfs: running CLEANUP procedure")
     systemd_nspawn(str(config["cleanup"]), output_path)
 
     return output_path
@@ -159,14 +174,22 @@ def cli_create(
             sys.exit(1)
 
     if rootfs_dir.exists():
+        logger.info("Removing rootfs_dir '%s'", rootfs_dir_string)
         shutil.rmtree(rootfs_dir)
+
     rootfs_dir.mkdir(parents=True, exist_ok=False)
 
     ctl_output_path = create_ctl(search_path)
+    logger.info("Successfully created rootfs-spawn-ctl rootfs.")
+    logger.info(
+        "Spawning the target rootfs using rootfs-spawn-ctl and rootfs config: %s",
+        rootfs_dir_string,
+    )
 
     packages_cache_dir = str(config["packages_cache_dir"])
     Path(packages_cache_dir).mkdir(parents=True, exist_ok=True)
 
+    logger.info("target rootfs: running SPAWN procedure")
     spawn_command = f"{config['spawn']} /mnt/rootfs"
     systemd_nspawn(
         spawn_command,
@@ -176,12 +199,17 @@ def cli_create(
         private_users=None,
     )
 
+    logger.info("target rootfs: running INIT procedure")
     systemd_nspawn(
         str(config["init"]),
         rootfs_dir,
         f"{rootfs_dir_string}:/mnt/rootfs",
     )
+
+    logger.info("target rootfs: running PROVISION procedure")
     systemd_nspawn(str(config["provision"]), rootfs_dir)
+
+    logger.info("target rootfs: running CLEANUP procedure")
     systemd_nspawn(str(config["cleanup"]), rootfs_dir)
 
 
