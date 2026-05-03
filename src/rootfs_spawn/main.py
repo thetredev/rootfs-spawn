@@ -4,13 +4,12 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-import pretty_errors
 import defopt
-from plumbum import local, FG
+import pretty_errors
+from plumbum import FG, local
 
 from rootfs_spawn import parser
 from rootfs_spawn.types import rootfs_spawn_config
-
 
 pretty_errors.configure(
     full_line_newline=False,
