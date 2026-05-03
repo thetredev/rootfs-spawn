@@ -22,16 +22,16 @@ init = {
   mkdir -p /etc/apt/sources.list.d
 
   cat > /mnt/rootfs/etc/apt/sources.list.d/debian.sources <<EOF
-  Types: deb
-  URIs: https://mirror.hetzner.com/debian/packages/
-  Suites: trixie trixie-updates trixie-backports
-  Components: main contrib non-free non-free-firmware
+  Types: deb deb-src
+  URIs: http://deb.debian.org/debian
+  Suites: trixie trixie-updates
+  Components: main contrib non-free-firmware
   Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
 
-  Types: deb
-  URIs: https://mirror.hetzner.com/debian/security/
+  Types: deb deb-src
+  URIs: http://security.debian.org/debian-security
   Suites: trixie-security
-  Components: main contrib non-free non-free-firmware
+  Components: main contrib non-free-firmware
   Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
   EOF
 
@@ -58,34 +58,6 @@ provision = {
     sys-kernel-config.mount
 
   mkdir -p /etc/network/interfaces.d
-
-  mkdir -p /etc/systemd/network/eth0.network.d
-  cat > /etc/systemd/network/eth0.network.d/metric.conf <<EOF
-  [IPv6AcceptRA]
-  RouteMetric=512
-  EOF
-
-  cat > /etc/systemd/network/eth0.network.d/dns.conf <<EOF
-  [Network]
-  DNS=2a01:4ff:ff00::add:1
-  DNS=2a01:4ff:ff00::add:2
-  EOF
-
-  cat > /etc/systemd/network/eth0.network.d/release.conf <<EOF
-  [DHCPv6]
-  SendRelease=true
-  EOF
-
-  mkdir -p /etc/systemd/network/eth1.network.d
-  cat > /etc/systemd/network/eth1.network.d/dns.conf <<EOF
-  [Network]
-  DNS=fd8c:314f:f123::2
-  EOF
-
-  cat > /etc/systemd/network/eth1.network.d/release.conf <<EOF
-  [DHCPv6]
-  SendRelease=true
-  EOF
 
   cat > /etc/systemd/system/systemd-networkd-wait-all.service <<EOF
   [Unit]
