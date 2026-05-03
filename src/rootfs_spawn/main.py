@@ -22,15 +22,6 @@ pretty_errors.configure(
 )
 
 
-PREREQUISITE_MAP: dict[str, list[Path]] = {
-    "debian": [
-        Path("debootstrap"),
-    ],
-    "archlinux": [Path("pacstrap")],
-}
-# PREREQUISITE_MAP["ubuntu"] = PREREQUISITE_MAP["debian"]
-
-
 class DistroNotSupportedError(Exception):
     pass
 
