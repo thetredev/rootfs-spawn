@@ -1,7 +1,7 @@
-provision = {
+provision = $(
   rm -rf /root/.bashrc
   cp /etc/skel/.bashrc /root/.bashrc
 
   rm -rf /root/.profile
   cp /etc/skel/.profile /root/.profile
-}
+)

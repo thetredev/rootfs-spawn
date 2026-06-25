@@ -1,6 +1,6 @@
-init = {
+init = $(
   cd /mnt/rootfs/etc
 
   unlink localtime
   ln -sf $(readlink -f /mnt/host/etc/localtime) localtime
-}
+)

@@ -1,4 +1,4 @@
-provision = {
+provision = $(
   rm -rf /etc/motd*
   touch /etc/motd
-}
+)

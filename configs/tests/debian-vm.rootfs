@@ -1,3 +1,12 @@
+type = vm
+disk = {
+  size = 10 # GiB
+  format = qcow2
+  boot = efi,1 # GiB
+  root = xfs,all # rest of GiB available
+}
+bootloader = systemd-boot # efi type if boot partition is efi
+
 imports = [
   defaults/debian/release
   defaults/debian/packages
@@ -14,7 +23,7 @@ imports = [
   defaults/debian/init
 ]
 
-init = {
+init = $(
   rm -rf /mnt/rootfs/usr/local/share/ca-certificates
   cp -r /mnt/host/usr/local/share/ca-certificates /mnt/rootfs/usr/local/share/ca-certificates
 
@@ -36,13 +45,13 @@ init = {
   EOF
 
   update-ca-certificates --fresh
-}
+)
 
 imports = [
   defaults/debian/provision/* !lxc.mounts
 ]
 
-provision = {
+provision = $(
   cat >> /etc/environment <<EOF
   EDITOR=vim
   EOF
@@ -92,7 +101,7 @@ provision = {
   apt purge -y ifupdown
 
   systemctl enable ssh
-}
+)
 
 imports = [
   defaults/debian/cleanup

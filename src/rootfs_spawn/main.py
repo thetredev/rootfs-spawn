@@ -2,7 +2,7 @@ import logging
 import shutil
 import sys
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, NamedTuple
 
 import defopt
 import pretty_errors
@@ -101,6 +101,123 @@ def parse_config(config_path: Path, search_path: Path) -> rootfs_spawn_config:
     return config
 
 
+def parse_block_kv(block: str) -> dict[str, str]:
+    """Parse `key = value` lines from a block body, stripping inline comments."""
+    result = {}
+    for line in block.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        key, _, value = line.partition("=")
+        result[key.strip()] = value.strip()
+    return result
+
+
+def parse_partition_spec(spec: str) -> tuple[str, str]:
+    """Parse a `fstype,size` spec, e.g. `efi,1` or `xfs,all`."""
+    fstype, _, size = spec.partition(",")
+    return fstype.strip(), size.strip()
+
+
+def sgdisk_size_arg(size: str) -> str:
+    return "0" if size == "all" else f"+{size}G"
+
+
+def find_free_nbd_device() -> str:
+    for i in range(16):
+        device = Path(f"/dev/nbd{i}")
+        size_path = Path(f"/sys/class/block/nbd{i}/size")
+        if device.exists() and size_path.exists() and size_path.read_text().strip() == "0":
+            return device.as_posix()
+
+    raise RuntimeError("No free /dev/nbdX device found; try 'modprobe nbd max_part=8'")
+
+
+class VmMount(NamedTuple):
+    image_path: Path
+    nbd_device: str
+    boot_fstype: str
+
+
+def create_vm_rootfs(
+    config: rootfs_spawn_config, rootfs_dir: Path, output_path: Path
+) -> VmMount:
+    """Create a disk image, partition/format it according to `disk`/`boot`/`root`,
+    and mount the root (and boot) partitions at `rootfs_dir`."""
+
+    disk_spec = parse_block_kv(str(config["disk"]))
+    size_gib = disk_spec["size"]
+    disk_format = disk_spec["format"]
+
+    boot_fstype, boot_size = parse_partition_spec(disk_spec["boot"])
+    root_fstype, root_size = parse_partition_spec(disk_spec["root"])
+
+    image_path = output_path.parent / f"{output_path.name}.{disk_format}"
+
+    logger.info("vm rootfs: creating disk image '%s' (%sGiB)", image_path, size_gib)
+    shell_command(
+        "qemu-img", ["create", "-f", disk_format, image_path.as_posix(), f"{size_gib}G"]
+    )
+
+    nbd_device = find_free_nbd_device()
+    logger.info("vm rootfs: attaching disk image via '%s'", nbd_device)
+    shell_command("qemu-nbd", ["-c", nbd_device, "-f", disk_format, image_path.as_posix()])
+
+    logger.info("vm rootfs: partitioning disk")
+    shell_command(
+        "sgdisk",
+        ["-n", f"1:0:{sgdisk_size_arg(boot_size)}", "-t", "1:ef00", nbd_device],
+    )
+    shell_command(
+        "sgdisk",
+        ["-n", f"2:0:{sgdisk_size_arg(root_size)}", "-t", "2:8300", nbd_device],
+    )
+    shell_command("partprobe", [nbd_device])
+
+    boot_partition = f"{nbd_device}p1"
+    root_partition = f"{nbd_device}p2"
+
+    logger.info("vm rootfs: formatting boot partition as '%s'", boot_fstype)
+    shell_command("mkfs.vfat", ["-F32", boot_partition])
+
+    logger.info("vm rootfs: formatting root partition as '%s'", root_fstype)
+    shell_command(f"mkfs.{root_fstype}", [root_partition])
+
+    rootfs_dir_string = rootfs_dir.as_posix()
+    logger.info("vm rootfs: mounting root partition at '%s'", rootfs_dir_string)
+    shell_command("mount", [root_partition, rootfs_dir_string])
+
+    boot_dir = rootfs_dir / "boot"
+    boot_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("vm rootfs: mounting boot partition at '%s'", boot_dir.as_posix())
+    shell_command("mount", [boot_partition, boot_dir.as_posix()])
+
+    return VmMount(image_path=image_path, nbd_device=nbd_device, boot_fstype=boot_fstype)
+
+
+def install_vm_bootloader(
+    config: rootfs_spawn_config, rootfs_dir: Path, vm_mount: VmMount
+) -> None:
+    bootloader = config.get("bootloader")
+    if bootloader is None:
+        return
+
+    if bootloader == "systemd-boot" and vm_mount.boot_fstype == "efi":
+        logger.info("vm rootfs: installing systemd-boot")
+        systemd_nspawn("bootctl install --esp-path=/boot", rootfs_dir)
+    else:
+        raise ValueError(f"Unsupported bootloader '{bootloader}' for boot type '{vm_mount.boot_fstype}'")
+
+
+def teardown_vm_rootfs(rootfs_dir: Path, vm_mount: VmMount) -> None:
+    logger.info("vm rootfs: unmounting boot and root partitions")
+    shell_command("umount", [(rootfs_dir / "boot").as_posix()])
+    shell_command("umount", [rootfs_dir.as_posix()])
+
+    logger.info("vm rootfs: detaching disk image from '%s'", vm_mount.nbd_device)
+    shell_command("qemu-nbd", ["-d", vm_mount.nbd_device])
+
+
 def create_ctl(search_path: Path) -> Path:
     config_rootfs = search_path / "ctl.rootfs"
     output_path = Path("/var/lib/machines/rootfs-spawn-ctl")
@@ -175,6 +292,11 @@ def cli_create(
 
     rootfs_dir.mkdir(parents=True, exist_ok=False)
 
+    vm_mount = None
+    if config.get("type") == "vm":
+        logger.info("target rootfs: type 'vm', provisioning disk image")
+        vm_mount = create_vm_rootfs(config, rootfs_dir, output_path)
+
     ctl_output_path = create_ctl(search_path)
     logger.info("Successfully created rootfs-spawn-ctl rootfs.")
     logger.info(
@@ -207,6 +329,11 @@ def cli_create(
 
     logger.info("target rootfs: running CLEANUP procedure")
     systemd_nspawn(str(config["cleanup"]), rootfs_dir)
+
+    if vm_mount is not None:
+        install_vm_bootloader(config, rootfs_dir, vm_mount)
+        teardown_vm_rootfs(rootfs_dir, vm_mount)
+        logger.info("target rootfs: vm disk image created at '%s'", vm_mount.image_path)
 
 
 def cli_config(distro: str, name: str) -> None:

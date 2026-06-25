@@ -26,9 +26,11 @@ list_val: "[" _NL+ list_item* "]"
 
 list_item: BARE_STRING _NL+
 
-// Named shell-script block
+// Named shell-script block. Shell blocks use $( ... ); plain config blocks
+// still use { ... }.
 
 block_def: IDENT "=" "{" _NL+ block_body "}" _NL*
+         | IDENT "=" "$(" _NL+ block_body ")" _NL*
 
 block_body: block_line*
 
@@ -60,9 +62,10 @@ ESCAPED_STRING.3: /\"[^\"\\]*(?:\\.[^\"\\]*)*\"/
 
 BARE_STRING: /(?:\$\{[^}]*\}|[^\s\[\]={}\#])+/
 
-// Non-empty line inside a block that is not a lone closing brace.
+// Non-empty line inside a block that is not a lone closing delimiter
+// (either "}" for { ... } blocks or ")" for $( ... ) blocks).
 
-BLOCK_CONTENT_LINE: /(?![ \t]*\}[ \t]*(\r?\n|$))[^\n]+/
+BLOCK_CONTENT_LINE: /(?![ \t]*[\}\)][ \t]*(\r?\n|$))[^\n]+/
 
 // Blank or whitespace-only line inside a block (consumed as a block_line).
 

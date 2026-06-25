@@ -1,4 +1,4 @@
-provision = {
+provision = $(
   apt-get -y update
   apt-get -y full-upgrade
-}
+)
