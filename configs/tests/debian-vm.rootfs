@@ -53,9 +53,7 @@ provision = {
 
   systemctl mask \
     networking \
-    systemd-networkd-wait-online \
-    sys-kernel-debug.mount \
-    sys-kernel-config.mount
+    systemd-networkd-wait-online
 
   mkdir -p /etc/network/interfaces.d
 
