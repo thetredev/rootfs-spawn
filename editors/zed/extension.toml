@@ -1,0 +1,12 @@
+id = "rootfs"
+name = "RootFS Spawn DSL"
+version = "0.0.1"
+schema_version = 1
+authors = ["Timo Reichl"]
+description = "Syntax highlighting for .rootfs provisioning DSL files used by rootfs-spawn"
+repository = "https://github.com/thetredev/rootfs-spawn"
+languages = ["languages/rootfs"]
+
+[grammars.rootfs]
+repository = "https://github.com/thetredev/tree-sitter-rootfs"
+rev = "a70b20615e8542984138f7245e5db3f2cfb0af36"
