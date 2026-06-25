@@ -37,9 +37,11 @@ block_line: BLOCK_CONTENT_LINE _NL
 
 // ─── Terminals ───────────────────────────────────────────────────────────────
 
-// Import path: may contain slashes, dots, and a trailing glob wildcard.
+// Import path: may contain slashes, dots, and a trailing glob wildcard,
+// optionally followed by "!" and a comma-separated exclude list naming
+// files to skip when the glob is expanded (e.g. "dir/* !a.rootfs,b.rootfs").
 
-IMPORT_PATH: /[a-zA-Z0-9_.][a-zA-Z0-9_.\/-]*(?:\/\*|\*)?/
+IMPORT_PATH: /[a-zA-Z0-9_.][a-zA-Z0-9_.\/-]*(?:\/\*|\*)?(?:[ \t]*![ \t]*[a-zA-Z0-9_.,-]+)?/
 
 // Assignment LHS: identifier followed by '=' (lookahead keeps '=' out of token)
 // Must not match the keyword "imports".

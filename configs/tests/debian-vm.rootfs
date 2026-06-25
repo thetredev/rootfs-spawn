@@ -1,0 +1,101 @@
+imports = [
+  defaults/debian/release
+  defaults/debian/packages
+  defaults/debian/cache
+  defaults/debian/spawn
+]
+
+packages = [
+  systemd-resolved
+  vim
+]
+
+imports = [
+  defaults/debian/init
+]
+
+init = {
+  rm -rf /mnt/rootfs/usr/local/share/ca-certificates
+  cp -r /mnt/host/usr/local/share/ca-certificates /mnt/rootfs/usr/local/share/ca-certificates
+
+  rm -rf /etc/apt/sources.list*
+  mkdir -p /etc/apt/sources.list.d
+
+  cat > /mnt/rootfs/etc/apt/sources.list.d/debian.sources <<EOF
+  Types: deb deb-src
+  URIs: http://deb.debian.org/debian
+  Suites: trixie trixie-updates
+  Components: main contrib non-free-firmware
+  Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+  Types: deb deb-src
+  URIs: http://security.debian.org/debian-security
+  Suites: trixie-security
+  Components: main contrib non-free-firmware
+  Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+  EOF
+
+  update-ca-certificates --fresh
+}
+
+imports = [
+  defaults/debian/provision/* !lxc.mounts
+]
+
+provision = {
+  cat >> /etc/environment <<EOF
+  EDITOR=vim
+  EOF
+
+  systemctl disable \
+    networking \
+    systemd-networkd-wait-online
+
+  systemctl mask \
+    networking \
+    systemd-networkd-wait-online \
+    sys-kernel-debug.mount \
+    sys-kernel-config.mount
+
+  mkdir -p /etc/network/interfaces.d
+
+  cat > /etc/systemd/system/systemd-networkd-wait-all.service <<EOF
+  [Unit]
+  Description=Wait for all network interfaces to come UP
+  Documentation=man:systemd-networkd(5)
+  DefaultDependencies=no
+  After=local-fs.target
+
+  [Service]
+  Type=oneshot
+  RemainAfterExit=yes
+  ExecStart=/usr/local/bin/systemd-networkd-wait-all.sh
+
+  [Install]
+  WantedBy=multi-user.target
+  EOF
+  ln -s /etc/systemd/system/systemd-networkd-wait-all.service /etc/systemd/system/multi-user.target.wants/
+
+  cat > /usr/local/bin/systemd-networkd-wait-all.sh <<EOF
+  #!/bin/bash
+
+  set -xe
+
+
+  ifaces=\$(ls /etc/systemd/network/eth*.network | grep -v '\.d' | cut -d '.' -f 1 | rev | cut -d '/' -f 1 | rev)
+
+  for iface in \${ifaces}; do
+          until [[ \$(ip a s dev \${iface} | grep inet6 | wc -l) -eq 2 ]]; do
+                  sleep 0.1
+          done
+  done
+  EOF
+
+  apt purge -y ifupdown
+
+  systemctl enable ssh
+}
+
+imports = [
+  defaults/debian/cleanup
+]

@@ -154,11 +154,22 @@ def _expand_imports(
             result.append(stmt)
             continue
         for import_path in stmt.value:  # type: ignore[union-attr]
-            if import_path.endswith("/*"):
-                dir_path = search_path / import_path[:-2]
-                paths = sorted(p for p in dir_path.iterdir() if p.is_file())
+            glob_path, _, exclude_part = import_path.partition("!")
+            glob_path = glob_path.strip()
+            excluded = {name.strip() for name in exclude_part.split(",") if name.strip()}
+            if glob_path.endswith("/*"):
+                dir_path = search_path / glob_path[:-2]
+                paths = sorted(
+                    p
+                    for p in dir_path.iterdir()
+                    if p.is_file() and p.name not in excluded
+                )
             else:
-                paths = [search_path / import_path]
+                if excluded:
+                    raise ValueError(
+                        f"exclude list is only valid for glob imports: {import_path}"
+                    )
+                paths = [search_path / glob_path]
             for path in paths:
                 path = path.resolve()
                 if path in _seen:
